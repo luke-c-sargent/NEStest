@@ -1,0 +1,8 @@
+Welcome wayward traveller; this is a place
+to store my NES experimentation.
+
+Version 00.0000000:
+===================
+-loads a player composed of 8 sprites
+-gets controller1 input, moves player
+-rudimentary background
