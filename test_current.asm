@@ -9,9 +9,10 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
   .rsset $0000  ;;vars at RAM x0000
-  
-button1   .rs 1 ;reserve one byte of space
-button2   .rs 1 
+framecount     .rs 1 ;frame counter
+seconds   .rs 1
+button1   .rs 1
+button2   .rs 1
 player1x  .rs 1
 player1y  .rs 1
 
@@ -20,7 +21,8 @@ player1y  .rs 1
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 P1STARTX	= $70
-P1STARTY	= $80
+P1STARTY	= $A0
+FPS   = $3C
 
 ;;memory bank 1; executable code
   .bank 0
@@ -87,12 +89,15 @@ LoadPalettesLoop:
   STA player1x
   LDA #P1STARTY
   STA player1y
+  LDA #$00
+  STA framecount
+  STA seconds
 
 
 LoadSprites:
   LDX #$00              ; start at 0
 LoadSpritesLoop:
-  LDA sprites, x        ; load data from address (sprites +  x)
+  LDA player1, x        ; load data from address (player1 +  x)
   STA $0200, x          ; store into RAM address ($0200 + x)
   INX                   ; X = X + 1
   CPX #$20              ; Compare X to hex $10, decimal 16
@@ -108,22 +113,38 @@ LoadBackground:
   LDA #$00
   STA $2006             ; write the low byte of $2000 address
   LDX #$00              ; start out at 0
-NukeY:
-  LDY #$00
-  INX
-  CPX #$08
-  BEQ BGExit
-  BNE LoadBackgroundLoop
-  LDX #$00
-LoadBackgroundLoop:
-  LDA background, y     ; load data from address (background + the value in x)
+
+    .WriteSky: ;;write the top 20 rows of 32 tiles as empty ($24 in mario)
+  LDA #$24
   STA $2007             ; write to PPU
-  INY
-  CPY #$20				;
-  BEQ NukeY
-  BNE LoadBackgroundLoop  ; Branch to LoadBackgroundLoop if compare was Not Equal to zero
-                        ; if compare was equal to 128, keep going down
-BGExit:
+  LDA #$24
+  STA $2007
+  LDA #$24
+  STA $2007
+  LDA #$24
+  STA $2007
+  LDA #$24
+  STA $2007
+  INX
+  CPX #$80 ;;32*20=640=5 sets of $80
+  BNE .WriteSky
+  LDX #$00
+    .WriteGround:
+  LDA #$25
+  STA $2007             ; write to PPU
+  LDA #$25
+  STA $2007
+  LDA #$25
+  STA $2007
+  LDA #$25
+  STA $2007
+  LDA #$25
+  STA $2007
+  INX
+  CPX #$40 ;;32*10=640=5 sets of $40
+  BNE .WriteGround
+  
+  .BGExit:
               
 LoadAttribute:
   LDA $2002             ; read PPU status to reset the high/low latch
@@ -144,7 +165,7 @@ LoadAttributeLoop:
               
               
               
-  LDA #%10000000   ; enable NMI, sprites from Pattern Table 0, background from Pattern Table 1
+  LDA #%10010000   ; enable NMI, sprites from Pattern Table 0, background from Pattern Table 1
   STA $2000 ;; PPU CONTROL
 
   LDA #%00011110   ; enable sprites, enable background, no clipping on left side
@@ -167,6 +188,8 @@ NMI:
 ;
   JSR ReadControllers
   JSR Movement
+  JSR TestBank1
+  JSR FrameCount
   
   RTI		;return from interrupt  
 ;;
@@ -206,6 +229,8 @@ Movement:  ;;input->sprite movement
   AND #%00000001
   BEQ .ReadRDone
   LDA player1x
+  CMP #$F0
+  BEQ .ReadRDone
   CLC
   ADC #$01
   STA player1x
@@ -215,7 +240,9 @@ Movement:  ;;input->sprite movement
   AND #%00000010
   BEQ .ReadLDone
   LDA player1x
-  SEC 
+  CMP #$00
+  BEQ .ReadLDone
+  SEC
   SBC #$01
   STA player1x
     .ReadLDone:
@@ -224,6 +251,8 @@ Movement:  ;;input->sprite movement
   AND #%00000100
   BEQ .ReadDDone
   LDA player1y
+  CMP #$C6
+  BEQ .ReadDDone
   CLC
   ADC #$01
   STA player1y
@@ -233,10 +262,13 @@ Movement:  ;;input->sprite movement
   AND #%00001000
   BEQ .ReadUDone
   LDA player1y
+  CMP #$90
+  BEQ .ReadUDone
   SEC 
   SBC #$01
   STA player1y
     .ReadUDone:
+	
   
     .MoveSprites: ;;8 tile player sprite
   CLC
@@ -269,9 +301,24 @@ Movement:  ;;input->sprite movement
   STA $020F
   STA $0217
   STA $021F
-
-
   RTS  ;;END Movement sr
+  
+FrameCount:
+  LDA framecount
+  CLC
+  ADC #$01
+  STA framecount
+  CMP #FPS
+  BNE .EndCount
+  LDA seconds
+  CLC
+  ADC #$01
+  STA seconds
+  LDA #$00
+  STA framecount
+  
+    .EndCount:
+  RTS
  
 ;;
 ;;;;;;;;;;;;;;;-END BANK0
@@ -283,8 +330,15 @@ Movement:  ;;input->sprite movement
 palette: ;$3F00-$3F0F =bg, $3F10-$3F1F=sprite
   .db $22,$29,$1A,$0F,  $22,$36,$17,$0F,  $22,$30,$21,$0F,  $22,$27,$17,$0F   ;;background palette
   .db $22,$37,$01,$18,  $22,$37,$30,$0F,  $22,$37,$0C,$0F,  $21,$25,$38,$04   ;;sprite palette
+  
+TestBank1:
+  LDA #$DE
+  STA $10
+  LDA #$AD
+  STA $11
+  RTS 
 
-sprites:
+player1:
      ;vert tile attr horiz
   .db $70, $00, $00, $80   ;sprite 0
   .db $70, $01, $00, $88   ;sprite 1
@@ -294,15 +348,8 @@ sprites:
   .db $80, $05, $02, $88   ;sprite 3
   .db $88, $06, $02, $80   ;sprite 2
   .db $88, $07, $02, $88   ;sprite 3
-
-
-background: ; 
-  .db $08,$09,$0A,$09,$0C,$08,$09,$0A,$09,$0C,$08,$09,$0A,$09,$0C,$08
-  .db $09,$0A,$09,$0C,$08,$09,$0A,$09,$0C,$08,$09,$0A,$09,$0C,$08,$09
   
-  .db $0A,$09,$0C,$08,$09,$0A,$09,$0C,$08,$09,$0A,$09,$0C,$08,$09,$0A
-  .db $09,$0C,$08,$09,$0A,$09,$0C,$08,$09,$0A,$09,$0C,$08,$09,$0A,$09
-  
+  ;;BOTTOM:10
   .db $0C,$08,$09,$0A,$09,$0C,$08,$09,$0A,$09,$0C,$08,$09,$0A,$09,$0C
   .db $08,$09,$0A,$09,$0C,$08,$09,$0A,$09,$0C,$08,$09,$0A,$09,$0C,$08
   
